@@ -95,7 +95,8 @@ def facts(c: dict) -> dict:
             flag("medium", "negative_cash_flow", f"Negative operating cash flow of {rm(s['operatingCashFlow'])}")
         icr = cap["interestCoverageRatio"]
         if icr is not None and icr < 1.5:
-            flag("medium", "interest_cover", f"Interest coverage of {icr:.2f}x (below 1.5x)")
+            flag("medium", "interest_cover", "Operating loss: earnings do not cover interest costs" if icr < 0
+                 else f"Interest coverage of {icr:.2f}x (below 1.5x)")
         if cap["leverageRatio"] is not None and cap["leverageRatio"] > 2:
             flag("medium", "leverage", f"High leverage: liabilities are {cap['leverageRatio']:.2f}x equity")
 
@@ -117,6 +118,10 @@ def facts(c: dict) -> dict:
              f"claims totalling {rm(sum(k['claimAmount'] or 0 for k in pending))}")
 
     flags.sort(key=lambda f: SEVERITY[f["severity"]])
+    # Verdict rule: any high flag, or 3+ medium signals together, is high risk.
+    high = sum(f["severity"] == "high" for f in flags)
+    medium = sum(f["severity"] == "medium" for f in flags)
+    verdict = "red" if high or medium >= 3 else "amber" if medium else "green"
     return {
         "registrationNumber": c["registrationNumber"], "companyName": p["companyName"],
         "status": p["status"], "industry": p["industry"], "state": p["state"],
@@ -127,6 +132,7 @@ def facts(c: dict) -> dict:
         "financials": fin,
         "litigation": {"total": len(cases), "asDefendant": len(against), "asPlaintiff": len(cases) - len(against)},
         "flags": flags,
+        "verdict": verdict,
     }
 
 
