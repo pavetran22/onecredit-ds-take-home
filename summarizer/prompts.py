@@ -58,11 +58,39 @@ def v2_grounded(company: dict, facts: dict) -> tuple[str, str]:
                                           "ageYears", "status", "natureOfBusiness")},
         "topShareholder": facts["topShareholder"],
         "financials": view,
-        "litigation": facts["litigation"],
+        "litigation": {k: facts["litigation"][k] for k in ("total", "asDefendant", "asPlaintiff")},
         "RED_FLAGS": [f["text"] for f in facts["flags"] if f["severity"] in ("high", "medium")],
-        "NOTES": [f["text"] for f in facts["flags"] if f["severity"] == "info"],
+        "NOTES": [f["text"] for f in facts["flags"] if f["severity"] == "info" and f["code"] != "turnaround"],
     }
     return AUDIENCE + "\n\n" + V2_RULES, "```json\n" + json.dumps(payload, indent=1, ensure_ascii=False) + "\n```"
 
 
-VERSIONS = {"v1-baseline": v1_baseline, "v2-grounded": v2_grounded}
+
+
+V3_RULES = V2_RULES.replace(
+    "**Also note**",
+    "**Litigation**\n<One line. If LITIGATION_AGAINST is not empty: list each open case against the company by type, "
+    "status and claim, with what it suggests (e.g. \"debt recovery, pending, RM120k: unpaid suppliers or lenders\"). "
+    "Then mention closedAgainst past cases if any. If there are no cases against the company, write "
+    "\"No open cases against the company.\" and, if asPlaintiff > 0, that it is the plaintiff in that many cases.>\n\n"
+    "**Also note**",
+).replace(
+    "cash flow, using the given values.",
+    "cash flow, using the given values. Then one sentence on the multi-year revenueTrend, if given.",
+).replace("- Maximum 150 words.", "- If TREND_NOTES is not empty, include it in Also note.\n- Maximum 170 words.")
+
+
+def v3_context(company: dict, facts: dict) -> tuple[str, str]:
+    """v2 plus the two gaps found by reading v2 as a user: multi-year trend and who is suing."""
+    system, prompt = v2_grounded(company, facts)
+    payload = json.loads(prompt.removeprefix("```json\n").removesuffix("\n```"))
+    if payload["financials"]:
+        payload["financials"]["revenueTrend"] = facts["financials"].get("revenueTrend")
+    lit = facts["litigation"]
+    payload["litigation"] = {k: lit[k] for k in ("total", "asDefendant", "asPlaintiff", "closedAgainst")}
+    payload["LITIGATION_AGAINST"] = lit["openAgainst"]
+    payload["TREND_NOTES"] = [f["text"] for f in facts["flags"] if f["code"] == "turnaround"]
+    return AUDIENCE + "\n\n" + V3_RULES, "```json\n" + json.dumps(payload, indent=1, ensure_ascii=False) + "\n```"
+
+
+VERSIONS = {"v1-baseline": v1_baseline, "v2-grounded": v2_grounded, "v3-context": v3_context}

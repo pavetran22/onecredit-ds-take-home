@@ -9,6 +9,10 @@ from datetime import date
 
 AS_OF = date(2025, 12, 31)  # the dataset is "as of 31 December 2025"
 SEVERITY = {"high": 0, "medium": 1, "info": 2}
+# What a case type suggests when the company is the defendant.
+MEANING = {"Debt recovery": "unpaid suppliers or lenders", "Employment claim": "dispute with staff, e.g. pay",
+           "Tenancy dispute": "rent or premises dispute", "Winding-up petition": "a creditor seeking to close it",
+           "Breach of contract": "did not deliver as agreed", "Construction dispute": "dispute over building works"}
 
 
 def rm(x: float | None) -> str:
@@ -117,6 +121,21 @@ def facts(c: dict) -> dict:
         flag("medium", "pending_lawsuits", f"{len(pending)} pending case(s) against the company, "
              f"claims totalling {rm(sum(k['claimAmount'] or 0 for k in pending))}")
 
+    # --- Trend context (v3): one year hides turnarounds and long declines
+    if fin and len(years) >= 2:
+        r0, r1 = years[0]["statements"]["revenue"], years[-1]["statements"]["revenue"]
+        if r0:
+            fin["revenueTrend"] = (f"{r1 / r0 - 1:+.0%} from FY{years[0]['financialYear']} ({rm(r0)}) "
+                                   f"to FY{years[-1]['financialYear']} ({rm(r1)})")
+        loss_years = [y["financialYear"] for y in years if y["statements"]["profitAfterTax"] < 0]
+        if loss_years and years[-1]["statements"]["profitAfterTax"] >= 0:
+            since = min(y["financialYear"] for y in years if y["financialYear"] > max(loss_years))
+            flag("info", "turnaround", f"Back in profit since FY{since} after losses in "
+                 + ", ".join(f"FY{y}" for y in loss_years))
+    open_against = [{"type": k["caseType"], "status": k["status"], "claim": rm(k["claimAmount"]),
+                     "suggests": MEANING.get(k["caseType"], "")}
+                    for k in against if k["status"] in ("Pending", "Judgment entered")]
+    closed_against = sum(k["status"] in ("Settled", "Withdrawn", "Dismissed") for k in against)
     flags.sort(key=lambda f: SEVERITY[f["severity"]])
     # Verdict rule: any high flag, or 3+ medium signals together, is high risk.
     high = sum(f["severity"] == "high" for f in flags)
@@ -130,7 +149,8 @@ def facts(c: dict) -> dict:
         "directors": len(directors),
         "topShareholder": {"name": top["name"], "percentage": top["percentage"]} if top else None,
         "financials": fin,
-        "litigation": {"total": len(cases), "asDefendant": len(against), "asPlaintiff": len(cases) - len(against)},
+        "litigation": {"total": len(cases), "asDefendant": len(against), "asPlaintiff": len(cases) - len(against),
+                       "openAgainst": open_against, "closedAgainst": closed_against},
         "flags": flags,
         "verdict": verdict,
     }

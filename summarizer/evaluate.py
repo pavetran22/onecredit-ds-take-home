@@ -32,6 +32,10 @@ CONTRADICTIONS = {
                                                       lambda c: any(y["audit"]["opinion"] != "Unqualified"
                                                                     for y in c["financials"]["years"])),
 }
+TYPE_PATTERNS = {"Debt recovery": r"debt", "Employment claim": r"employ|staff|salar|wage",
+                 "Tenancy dispute": r"tenan|rent|landlord", "Winding-up petition": r"winding",
+                 "Breach of contract": r"breach|contract", "Construction dispute": r"construction"}
+TURN = r"back in profit|return(ed)? to profit|turnaround|turned around|recover|after (net )?loss|previous(ly)? (net )?loss|prior (net )?loss"
 MONEY = re.compile(r"(-)?\s*\b(?:RM|MYR)\s*(-)?\s*([\d,]+(?:\.\d+)?)\s*(k|m|mn|million|bn|billion)?\b", re.I)
 PCT = re.compile(r"(-?\d+(?:\.\d+)?)\s*%")
 DEC = re.compile(r"(?<![\w.,])(-?\d+\.\d+)(?![\d%])")
@@ -103,9 +107,14 @@ def evaluate(version: str) -> dict:
         n_found, bad = check_numbers(text, *source_numbers(c, f))
         contra = [name for name, (pat, cond) in CONTRADICTIONS.items() if re.search(pat, text, re.I) and cond(c)]
         risky = f["verdict"] == "green" and re.search(RISKY, re.sub(SAFE, "", text, flags=re.I), re.I) is not None
+        open_types = sorted({k["type"] for k in f["litigation"].get("openAgainst", [])})
+        types_missed = [t for t in open_types if not re.search(TYPE_PATTERNS.get(t, re.escape(t)), text, re.I)]
+        turnaround = any(fl["code"] == "turnaround" for fl in f["flags"])
+        turn_noted = bool(re.search(TURN, text, re.I)) if turnaround else None
         rows.append({"registrationNumber": reg, "verdict": f["verdict"], "flags": [fl["code"] for fl in flags],
                      "missed": missed, "numbers": n_found, "unsupported": bad, "contradictions": contra,
-                     "falseAlarm": risky, "words": len(text.split())})
+                     "falseAlarm": risky, "words": len(text.split()), "openTypes": open_types, "typesMissed": types_missed,
+                     "turnaround": turnaround, "turnaroundNoted": turn_noted})
     with open(f"outputs/eval_{version}.jsonl", "w") as out:
         for r in rows:
             out.write(json.dumps(r) + "\n")
@@ -121,6 +130,8 @@ def evaluate(version: str) -> dict:
         "number accuracy": 1 - sum(len(r["unsupported"]) for r in rows) / nums if nums else 1,
         "contradictions": sum(len(r["contradictions"]) for r in rows),
         "false alarms (green)": f"{sum(r['falseAlarm'] for r in greens)}/{len(greens)}",
+        "turnaround noted": f"{sum(bool(r['turnaroundNoted']) for r in rows if r['turnaround'])}/{sum(r['turnaround'] for r in rows)}",
+        "lit. types named": 1 - sum(len(r["typesMissed"]) for r in rows) / max(1, sum(len(r["openTypes"]) for r in rows)),
         "avg words": sum(r["words"] for r in rows) / len(rows),
         "max words": max(r["words"] for r in rows),
     }
