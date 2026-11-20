@@ -102,8 +102,11 @@ def facts(c: dict) -> dict:
     # --- Litigation (being sued matters more than suing)
     against = [k for k in cases if k["role"] == "defendant"]
     for k in against:
-        if k["caseType"] == "Winding-up petition" and k["status"] not in ("Withdrawn", "Dismissed"):
-            flag("high", "winding_up_petition", f"Winding-up petition against the company ({k['status']}, filed {k['filedOn']})")
+        if k["caseType"] == "Winding-up petition":
+            if k["status"] in ("Withdrawn", "Dismissed", "Settled"):  # closed: history, not a live threat
+                flag("info", "past_winding_up_petition", f"Past winding-up petition ({k['status']}, filed {k['filedOn']})")
+            else:
+                flag("high", "winding_up_petition", f"Winding-up petition against the company ({k['status']}, filed {k['filedOn']})")
     judged = [k for k in against if k["status"] == "Judgment entered"]
     if judged:
         flag("high", "judgment_against", f"{len(judged)} judgment(s) entered against the company, "
